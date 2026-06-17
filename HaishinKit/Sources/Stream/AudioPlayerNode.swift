@@ -49,7 +49,7 @@ final actor AudioPlayerNode {
         let isConn = (await player?.isConnected(self) == true)
         let isPCM = (audioBuffer is AVAudioPCMBuffer)
         if isFormatChange || !isConn {
-            NSLog("[HKDIAG] AudioPlayerNode.enqueue formatChange=%@ isConnected=%@ isPCM=%@ buffered=%d",
+            hkdiag("[HKDIAG] AudioPlayerNode.enqueue formatChange=%@ isConnected=%@ isPCM=%@ buffered=%d",
                   isFormatChange ? "true" : "false",
                   isConn ? "true" : "false",
                   isPCM ? "true" : "false",
@@ -63,7 +63,7 @@ final actor AudioPlayerNode {
         }
         scheduledAudioBuffers += 1
         if !isPaused && !playerNode.isPlaying && Self.bufferCounts <= scheduledAudioBuffers {
-            NSLog("[HKDIAG] AudioPlayerNode.enqueue playerNode.play() buffered=%d",
+            hkdiag("[HKDIAG] AudioPlayerNode.enqueue playerNode.play() buffered=%d",
                   scheduledAudioBuffers)
             playerNode.play()
         }

@@ -36,12 +36,12 @@ final actor MediaLink {
         }
         if presentationTimeStampOrigin == .invalid {
             presentationTimeStampOrigin = sampleBuffer.presentationTimeStamp
-            NSLog("[HKDIAG] MediaLink.enqueue first ptsOrigin=%f", presentationTimeStampOrigin.seconds)
+            hkdiag("[HKDIAG] MediaLink.enqueue first ptsOrigin=%f", presentationTimeStampOrigin.seconds)
         }
         do {
             try storage?.enqueue(sampleBuffer)
         } catch {
-            NSLog("[HKDIAG] MediaLink.enqueue OVERFLOW (QueueIsFull) headCount=?? err=%@", String(describing: error))
+            hkdiag("[HKDIAG] MediaLink.enqueue OVERFLOW (QueueIsFull) headCount=?? err=%@", String(describing: error))
             logger.error(error)
         }
     }
@@ -95,7 +95,7 @@ extension MediaLink: AsyncRunner {
                 diagTick += 1
                 // displayLink は ~60Hz。60tick (1秒) ごとに状態を出す。
                 if diagTick % 60 == 0 {
-                    NSLog("[HKDIAG] MediaLink.tick storageEmpty=%@ currentTime=%f audioCurrent=%f frameCountThisTick=%d duration=%f",
+                    hkdiag("[HKDIAG] MediaLink.tick storageEmpty=%@ currentTime=%f audioCurrent=%f frameCountThisTick=%d duration=%f",
                           storageEmpty ? "true" : "false", currentTime, audioCurrent, frameCount, duration)
                 }
             }
