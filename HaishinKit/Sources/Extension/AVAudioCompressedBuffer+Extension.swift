@@ -17,6 +17,16 @@ extension AVAudioCompressedBuffer {
         return true
     }
 
+    package final func clone() -> AVAudioCompressedBuffer {
+        let buffer = AVAudioCompressedBuffer(
+            format: format,
+            packetCapacity: packetCapacity,
+            maximumPacketSize: maximumPacketSize
+        )
+        buffer.copy(self)
+        return buffer
+    }
+
     package func encode(to data: inout Data) {
         guard let config = AudioSpecificConfig(formatDescription: format.formatDescription) else {
             return

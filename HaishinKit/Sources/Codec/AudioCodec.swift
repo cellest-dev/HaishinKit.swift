@@ -1,4 +1,5 @@
 import AVFoundation
+import Foundation
 
 /// The AudioCodec translate audio data to another format.
 /// - seealso: https://developer.apple.com/library/ios/technotes/tn2236/_index.html
@@ -47,6 +48,9 @@ final class AudioCodec {
     private var outputBuffers: [AVAudioBuffer] = []
     private var audioConverter: AVAudioConverter?
     private var inputBuffersCursor = AudioCodec.defaultInputBuffersCursor
+    private var diagAppendCount = 0
+    private var diagOutputCount = 0
+    private var diagLastOutputStatus: AVAudioConverterOutputStatus?
 
     func append(_ sampleBuffer: CMSampleBuffer) {
         guard isRunning else {
@@ -93,6 +97,14 @@ final class AudioCodec {
             }
             return
         }
+        diagAppendCount += 1
+        if diagAppendCount <= 5 || diagAppendCount % 100 == 0 {
+            hkdiag("[HKDIAG] AudioCodec.append count=%d input=%@ converterInput=%@ converterOutput=%@",
+                  diagAppendCount,
+                  String(describing: audioBuffer.format),
+                  String(describing: audioConverter.inputFormat),
+                  String(describing: audioConverter.outputFormat))
+        }
         var error: NSError?
         if let audioBuffer = audioBuffer as? AVAudioPCMBuffer {
             ringBuffer?.append(audioBuffer, when: when)
@@ -126,6 +138,18 @@ final class AudioCodec {
             }
             switch outputStatus {
             case .haveData:
+                diagLastOutputStatus = outputStatus
+                diagOutputCount += 1
+                if diagOutputCount <= 5 || diagOutputCount % 100 == 0 {
+                    let stats = pcmStats(outputBuffer)
+                    hkdiag("[HKDIAG] AudioCodec.output count=%d frames=%d format=%@ rms=%f peak=%f nonZero=%d",
+                          diagOutputCount,
+                          Int((outputBuffer as? AVAudioPCMBuffer)?.frameLength ?? 0),
+                          String(describing: outputBuffer.format),
+                          stats.rms,
+                          stats.peak,
+                          stats.nonZero)
+                }
                 if audioTime.hasAnchor {
                     audioTime.advanced(AVAudioFramePosition(audioConverter.outputFormat.streamDescription.pointee.mFramesPerPacket))
                     _outputStream.yield((outputBuffer, audioTime.at))
@@ -136,7 +160,23 @@ final class AudioCodec {
                 if inputBuffersCursor == inputBuffers.count {
                     inputBuffersCursor = Self.defaultInputBuffersCursor
                 }
+            case .error:
+                hkdiag("[HKDIAG] AudioCodec.output status=error append=%d output=%d error=%@",
+                      diagAppendCount,
+                      diagOutputCount,
+                      error?.localizedDescription ?? "nil")
+                audioConverter.reset()
+                diagLastOutputStatus = outputStatus
+                releaseOutputBuffer(outputBuffer)
             default:
+                if diagAppendCount <= 5 || diagAppendCount % 100 == 0 || diagLastOutputStatus != outputStatus {
+                    hkdiag("[HKDIAG] AudioCodec.output status=%@ append=%d output=%d error=%@",
+                          String(describing: outputStatus),
+                          diagAppendCount,
+                          diagOutputCount,
+                          error?.localizedDescription ?? "nil")
+                }
+                diagLastOutputStatus = outputStatus
                 releaseOutputBuffer(outputBuffer)
             }
         } while(outputStatus == .haveData && settings.format != .pcm)
@@ -175,6 +215,36 @@ final class AudioCodec {
         }
         return converter
     }
+
+    private func pcmStats(_ buffer: AVAudioBuffer) -> (rms: Double, peak: Double, nonZero: Int) {
+        guard
+            let buffer = buffer as? AVAudioPCMBuffer,
+            let channelData = buffer.floatChannelData else {
+            return (-1, -1, 0)
+        }
+        let channels = Int(buffer.format.channelCount)
+        let frames = Int(buffer.frameLength)
+        guard 0 < channels, 0 < frames else {
+            return (0, 0, 0)
+        }
+        var sumSquares = 0.0
+        var peak = 0.0
+        var nonZero = 0
+        for channel in 0..<channels {
+            let samples = channelData[channel]
+            for frame in 0..<frames {
+                let value = Double(samples[frame])
+                let absValue = abs(value)
+                sumSquares += value * value
+                peak = max(peak, absValue)
+                if 0.000001 < absValue {
+                    nonZero += 1
+                }
+            }
+        }
+        let sampleCount = max(1, channels * frames)
+        return (sqrt(sumSquares / Double(sampleCount)), peak, nonZero)
+    }
 }
 
 extension AudioCodec: Codec {
@@ -211,6 +281,9 @@ extension AudioCodec: Runner {
         audioTime.reset()
         ringBuffer?.reset()
         audioConverter?.reset()
+        diagAppendCount = 0
+        diagOutputCount = 0
+        diagLastOutputStatus = nil
         isRunning = true
     }
 

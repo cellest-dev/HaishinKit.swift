@@ -125,4 +125,35 @@ import Testing
         #expect(iterator.next() == Data([193, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5]))
         #expect(iterator.next() == nil)
     }
+
+    @Test func readFragmentedMessageKeepsInitialChunkType() throws {
+        let chunkSize = 16
+        let writeBuffer = RTMPChunkBuffer(chunkSize: chunkSize)
+        let message = RTMPDataMessage(
+            streamId: 1,
+            objectEncoding: .amf0,
+            timestamp: 33,
+            handlerName: [String](repeating: "a", count: 32).joined()
+        )
+        let chunks = Array(writeBuffer.putMessage(.zero, chunkStreamId: 5, message: message))
+        #expect(chunks.count > 1)
+
+        let readBuffer = RTMPChunkBuffer(chunkSize: chunkSize)
+        let header = RTMPChunkMessageHeader()
+        var completedMessage: RTMPDataMessage?
+        var completedOnChunkType: RTMPChunkType?
+        for chunk in chunks {
+            readBuffer.put(chunk)
+            let (chunkType, _) = try readBuffer.getBasicHeader()
+            try readBuffer.getMessageHeader(chunkType, messageHeader: header)
+            if let message = header.makeMessage() as? RTMPDataMessage {
+                completedMessage = message
+                completedOnChunkType = chunkType
+            }
+        }
+
+        #expect(completedMessage?.handlerName == message.handlerName)
+        #expect(completedOnChunkType == .three)
+        #expect(header.messageChunkType == .zero)
+    }
 }

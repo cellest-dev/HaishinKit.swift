@@ -481,7 +481,7 @@ public actor RTMPConnection: HaishinKit.NetworkConnection {
                     if let messageHeader = chunks[chunkStreamId] {
                         try inputBuffer.getMessageHeader(chunkType, messageHeader: messageHeader)
                         if let message = messageHeader.makeMessage() {
-                            await dispatch(message, type: chunkType)
+                            await dispatch(message, type: messageHeader.messageChunkType)
                             messageHeader.reset()
                         }
                     }

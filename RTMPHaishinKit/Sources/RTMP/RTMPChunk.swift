@@ -40,6 +40,7 @@ final class RTMPChunkMessageHeader {
     static let maxTimestamp: UInt32 = 0xFFFFFF
 
     var timestamp: UInt32 = 0
+    var messageChunkType: RTMPChunkType = .zero
     var messageLength: Int = 0 {
         didSet {
             guard payload.count != messageLength else {
@@ -53,6 +54,9 @@ final class RTMPChunkMessageHeader {
     var messageStreamId: UInt32 = 0
     private(set) var payload = Data()
     private var position = 0
+    var isMessageContinuation: Bool {
+        0 < position
+    }
 
     init() {
     }
@@ -196,6 +200,9 @@ final class RTMPChunkBuffer {
     func getMessageHeader(_ type: RTMPChunkType, messageHeader: RTMPChunkMessageHeader) throws {
         if remaining < type.headerSize {
             throw RTMPChunkError.bufferUnderflow
+        }
+        if !messageHeader.isMessageContinuation {
+            messageHeader.messageChunkType = type
         }
         switch type {
         case .zero:

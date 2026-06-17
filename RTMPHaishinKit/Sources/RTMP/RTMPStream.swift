@@ -220,6 +220,10 @@ public actor RTMPStream {
     private var dataTimestamps: [String: Date] = .init()
     private var audioTimestamp: RTMPTimestamp<AVAudioTime> = .init()
     private var videoTimestamp: RTMPTimestamp<CMTime> = .init()
+    private var diagAudioPacketCount = 0
+    private var diagVideoPacketCount = 0
+    private var diagVideoAcceptedCount = 0
+    private var diagVideoDroppedCount = 0
     private var requestTimeout = RTMPConnection.defaultRequestTimeout
     private var expectedResponse: Code?
     package var bitRateStrategy: (any StreamBitRateStrategy)?
@@ -635,6 +639,17 @@ public actor RTMPStream {
 
     private func append(_ message: RTMPAudioMessage, type: RTMPChunkType) {
         audioTimestamp.update(message, chunkType: type)
+        diagAudioPacketCount += 1
+        if diagAudioPacketCount <= 5 || diagAudioPacketCount % 100 == 0 {
+            let packetType = 1 < message.payload.count ? Int(message.payload[1]) : -1
+            hkdiag("[HKDIAG] RTMPStream.audio packet count=%d packetType=%d codec=%@ ts=%f payload=%d formatSet=%@",
+                  diagAudioPacketCount,
+                  packetType,
+                  String(describing: message.codec),
+                  audioTimestamp.value.seconds,
+                  message.payload.count,
+                  audioFormat == nil ? "false" : "true")
+        }
         guard message.codec.isSupported else {
             hkdiag("[HKDIAG] RTMPStream.audio UNSUPPORTED codec=%@ payload.count=%d",
                   String(describing: message.codec), message.payload.count)
@@ -655,7 +670,9 @@ public actor RTMPStream {
             }
             if let audioBuffer {
                 message.copyMemory(audioBuffer)
-                Task { await incoming.append(audioBuffer, when: audioTimestamp.value) }
+                let audioBuffer = audioBuffer.clone()
+                let audioTimestamp = audioTimestamp.value
+                Task { await incoming.append(audioBuffer, when: audioTimestamp) }
             } else {
                 hkdiag("[HKDIAG] RTMPStream.audio RAW but audioBuffer=nil (audioFormat didSet not yet run?)")
             }
@@ -666,7 +683,29 @@ public actor RTMPStream {
 
     private func append(_ message: RTMPVideoMessage, type: RTMPChunkType) {
         videoTimestamp.update(message, chunkType: type)
-        guard RTMPTagType.video.headerSize <= message.payload.count && message.isSupported else {
+        diagVideoPacketCount += 1
+        guard RTMPTagType.video.headerSize <= message.payload.count else {
+            diagVideoDroppedCount += 1
+            hkdiag("[HKDIAG] RTMPStream.video DROP short count=%d dropped=%d payload=%d required=%d",
+                  diagVideoPacketCount, diagVideoDroppedCount, message.payload.count, RTMPTagType.video.headerSize)
+            return
+        }
+        let frameType = (message.payload[0] & 0b01110000) >> 4
+        if diagVideoPacketCount <= 5 || diagVideoPacketCount % 100 == 0 {
+            hkdiag("[HKDIAG] RTMPStream.video packet count=%d packetType=%d ex=%@ frameType=%d ts=%f cts=%d payload=%d formatSet=%@",
+                  diagVideoPacketCount,
+                  Int(message.packetType),
+                  message.isExHeader ? "true" : "false",
+                  Int(frameType),
+                  videoTimestamp.value.seconds,
+                  Int(message.compositionTime),
+                  message.payload.count,
+                  videoFormat == nil ? "false" : "true")
+        }
+        guard message.isSupported else {
+            diagVideoDroppedCount += 1
+            hkdiag("[HKDIAG] RTMPStream.video DROP unsupported count=%d dropped=%d payload=%d packetType=%d",
+                  diagVideoPacketCount, diagVideoDroppedCount, message.payload.count, Int(message.packetType))
             return
         }
         if message.isExHeader {
@@ -674,22 +713,39 @@ public actor RTMPStream {
             switch message.packetType {
             case RTMPVideoPacketType.sequenceStart.rawValue:
                 videoFormat = message.makeFormatDescription()
+                hkdiag("[HKDIAG] RTMPStream.video sequenceStart format=%@",
+                      String(describing: videoFormat))
             case RTMPVideoPacketType.codedFrames.rawValue:
+                diagVideoAcceptedCount += 1
                 Task { await incoming.append(message, presentationTimeStamp: videoTimestamp.value, formatDesciption: videoFormat) }
             case RTMPVideoPacketType.codedFramesX.rawValue:
+                diagVideoAcceptedCount += 1
                 Task { await incoming.append(message, presentationTimeStamp: videoTimestamp.value, formatDesciption: videoFormat) }
             default:
+                diagVideoDroppedCount += 1
+                hkdiag("[HKDIAG] RTMPStream.video DROP ex packetType=%d count=%d accepted=%d dropped=%d",
+                      Int(message.packetType), diagVideoPacketCount, diagVideoAcceptedCount, diagVideoDroppedCount)
                 break
             }
         } else {
             switch message.packetType {
             case RTMPAVCPacketType.seq.rawValue:
                 videoFormat = message.makeFormatDescription()
+                hkdiag("[HKDIAG] RTMPStream.video avcSeq format=%@",
+                      String(describing: videoFormat))
             case RTMPAVCPacketType.nal.rawValue:
+                diagVideoAcceptedCount += 1
                 Task { await incoming.append(message, presentationTimeStamp: videoTimestamp.value, formatDesciption: videoFormat) }
             default:
+                diagVideoDroppedCount += 1
+                hkdiag("[HKDIAG] RTMPStream.video DROP avc packetType=%d count=%d accepted=%d dropped=%d",
+                      Int(message.packetType), diagVideoPacketCount, diagVideoAcceptedCount, diagVideoDroppedCount)
                 break
             }
+        }
+        if diagVideoPacketCount <= 5 || diagVideoPacketCount % 100 == 0 {
+            hkdiag("[HKDIAG] RTMPStream.video totals packets=%d accepted=%d dropped=%d",
+                  diagVideoPacketCount, diagVideoAcceptedCount, diagVideoDroppedCount)
         }
     }
 

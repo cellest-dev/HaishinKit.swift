@@ -29,6 +29,8 @@ final class VideoCodec {
     private var continuation: AsyncStream<CMSampleBuffer>.Continuation?
     private var invalidateSession = true
     private var presentationTimeStamp: CMTime = .zero
+    private var diagInputCount = 0
+    private var diagDroppedCount = 0
     private(set) var isRunning = false
     private(set) var inputFormat: CMFormatDescription? {
         didSet {
@@ -52,6 +54,18 @@ final class VideoCodec {
             return
         }
         do {
+            diagInputCount += 1
+            let isCompressed = sampleBuffer.formatDescription?.isCompressed == true
+            if diagInputCount <= 5 || diagInputCount % 100 == 0 {
+                hkdiag("[HKDIAG] VideoCodec.append input count=%d compressed=%@ pts=%f dts=%f duration=%f key=%@ fmt=%@",
+                      diagInputCount,
+                      isCompressed ? "true" : "false",
+                      sampleBuffer.presentationTimeStamp.seconds,
+                      sampleBuffer.decodeTimeStamp.seconds,
+                      sampleBuffer.duration.seconds,
+                      sampleBuffer.isNotSync ? "false" : "true",
+                      String(describing: sampleBuffer.formatDescription))
+            }
             inputFormat = sampleBuffer.formatDescription
             if invalidateSession {
                 if sampleBuffer.formatDescription?.isCompressed == true {
@@ -59,8 +73,17 @@ final class VideoCodec {
                 } else {
                     session = try VTSessionMode.compression.makeSession(self)
                 }
+                hkdiag("[HKDIAG] VideoCodec.session created mode=%@ inputFmt=%@",
+                      isCompressed ? "decompression" : "compression",
+                      String(describing: sampleBuffer.formatDescription))
             }
             guard let session, let continuation else {
+                diagDroppedCount += 1
+                hkdiag("[HKDIAG] VideoCodec.append DROP sessionOrContinuationNil input=%d dropped=%d hasSession=%@ hasContinuation=%@",
+                      diagInputCount,
+                      diagDroppedCount,
+                      session == nil ? "false" : "true",
+                      continuation == nil ? "false" : "true")
                 return
             }
             if sampleBuffer.formatDescription?.isCompressed == true {
@@ -69,9 +92,22 @@ final class VideoCodec {
                 if useFrame(sampleBuffer.presentationTimeStamp) {
                     try session.convert(sampleBuffer, continuation: continuation)
                     presentationTimeStamp = sampleBuffer.presentationTimeStamp
+                } else {
+                    diagDroppedCount += 1
+                    if diagDroppedCount <= 5 || diagDroppedCount % 100 == 0 {
+                        hkdiag("[HKDIAG] VideoCodec.append DROP useFrame=false dropped=%d pts=%f previousPts=%f frameInterval=%f",
+                              diagDroppedCount,
+                              sampleBuffer.presentationTimeStamp.seconds,
+                              presentationTimeStamp.seconds,
+                              frameInterval)
+                    }
                 }
             }
         } catch {
+            hkdiag("[HKDIAG] VideoCodec.append ERROR input=%d pts=%f error=%@",
+                  diagInputCount,
+                  sampleBuffer.presentationTimeStamp.seconds,
+                  String(describing: error))
             logger.warn(error)
         }
     }
@@ -164,6 +200,8 @@ extension VideoCodec: Runner {
         inputFormat = nil
         outputFormat = nil
         presentationTimeStamp = .zero
+        diagInputCount = 0
+        diagDroppedCount = 0
         continuation?.finish()
         startedAt = .zero
         #if os(iOS) || os(tvOS) || os(visionOS)

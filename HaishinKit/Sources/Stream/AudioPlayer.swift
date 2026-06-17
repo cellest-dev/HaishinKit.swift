@@ -17,14 +17,23 @@ public final actor AudioPlayer {
         return connected[playerNode] == true
     }
 
-    func connect(_ playerNode: AudioPlayerNode, format: AVAudioFormat?) {
+    @discardableResult
+    func connect(_ playerNode: AudioPlayerNode, format: AVAudioFormat?, force: Bool = false) -> Bool {
         guard let audioEngine, let avPlayerNode = playerNodes[playerNode] else {
             hkdiag("[HKDIAG] AudioPlayer.connect ABORT engine=%@ playerNodes[node]=%@",
                   audioEngine == nil ? "nil" : "set",
                   playerNodes[playerNode] == nil ? "nil" : "set")
-            return
+            return false
         }
         if let format {
+            guard avPlayerNode.engine === audioEngine else {
+                connected[playerNode] = nil
+                hkdiag("[HKDIAG] AudioPlayer.connect ABORT detached node=%p", avPlayerNode)
+                return false
+            }
+            if connected[playerNode] == true, audioEngine.isRunning, !force {
+                return true
+            }
             hkdiag("[HKDIAG] AudioPlayer.connect pre format=%@ isRunning=%@",
                   String(describing: format),
                   audioEngine.isRunning ? "true" : "false")
@@ -41,24 +50,40 @@ public final actor AudioPlayer {
             } else {
                 hkdiag("[HKDIAG] AudioPlayer.connect engine already running")
             }
-            connected[playerNode] = true
-            hkdiag("[HKDIAG] AudioPlayer.connect DONE connected=true outFmt=%@",
+            connected[playerNode] = audioEngine.isRunning
+            hkdiag("[HKDIAG] AudioPlayer.connect DONE connected=%@ outFmt=%@",
+                  connected[playerNode] == true ? "true" : "false",
                   String(describing: audioEngine.outputNode.outputFormat(forBus: 0)))
+            return connected[playerNode] == true
         } else {
             hkdiag("[HKDIAG] AudioPlayer.connect disconnect (format=nil)")
+            connected[playerNode] = nil
+            guard avPlayerNode.engine === audioEngine else {
+                hkdiag("[HKDIAG] AudioPlayer.connect disconnect SKIP detached node=%p", avPlayerNode)
+                return false
+            }
             if audioEngine.isRunning {
                 audioEngine.stop()
             }
             audioEngine.disconnectNodeOutput(avPlayerNode)
-            connected[playerNode] = nil
+            return false
         }
     }
 
     func detach(_ playerNode: AudioPlayerNode) {
-        if let playerNode = playerNodes[playerNode] {
-            audioEngine?.detach(playerNode)
+        connected[playerNode] = nil
+        guard let avPlayerNode = playerNodes[playerNode] else {
+            return
         }
         playerNodes[playerNode] = nil
+        guard let audioEngine, avPlayerNode.engine === audioEngine else {
+            hkdiag("[HKDIAG] AudioPlayer.detach SKIP detached node=%p", avPlayerNode)
+            return
+        }
+        hkdiag("[HKDIAG] AudioPlayer.detach node=%p engineRunning=%@",
+              avPlayerNode,
+              audioEngine.isRunning ? "true" : "false")
+        audioEngine.detach(avPlayerNode)
     }
 
     func makePlayerNode() -> AudioPlayerNode {

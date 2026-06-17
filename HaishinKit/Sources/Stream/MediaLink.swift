@@ -21,6 +21,9 @@ final actor MediaLink {
     private var presentationTimeStampOrigin: CMTime = .invalid
     private lazy var displayLink = DisplayLinkChoreographer()
     private weak var audioPlayer: AudioPlayerNode?
+    private var diagEnqueued = 0
+    private var diagYielded = 0
+    private var diagOverflow = 0
 
     init() {
         do {
@@ -40,7 +43,9 @@ final actor MediaLink {
         }
         do {
             try storage?.enqueue(sampleBuffer)
+            diagEnqueued += 1
         } catch {
+            diagOverflow += 1
             hkdiag("[HKDIAG] MediaLink.enqueue OVERFLOW (QueueIsFull) headCount=?? err=%@", String(describing: error))
             logger.error(error)
         }
@@ -92,11 +97,22 @@ extension MediaLink: AsyncRunner {
                     frameCount += 1
                     _ = storage.dequeue()
                 }
+                diagYielded += frameCount
                 diagTick += 1
                 // displayLink は ~60Hz。60tick (1秒) ごとに状態を出す。
                 if diagTick % 60 == 0 {
-                    hkdiag("[HKDIAG] MediaLink.tick storageEmpty=%@ currentTime=%f audioCurrent=%f frameCountThisTick=%d duration=%f",
-                          storageEmpty ? "true" : "false", currentTime, audioCurrent, frameCount, duration)
+                    hkdiag("[HKDIAG] MediaLink.tick storageEmpty=%@ currentTime=%f audioCurrent=%f frameCountThisTick=%d enqueuedPerSec=%d yieldedPerSec=%d overflowPerSec=%d duration=%f",
+                          storageEmpty ? "true" : "false",
+                          currentTime,
+                          audioCurrent,
+                          frameCount,
+                          diagEnqueued,
+                          diagYielded,
+                          diagOverflow,
+                          duration)
+                    diagEnqueued = 0
+                    diagYielded = 0
+                    diagOverflow = 0
                 }
             }
         }
@@ -110,6 +126,9 @@ extension MediaLink: AsyncRunner {
         displayLink.stopRunning()
         presentationTimeStampOrigin = .invalid
         try? storage?.reset()
+        diagEnqueued = 0
+        diagYielded = 0
+        diagOverflow = 0
         isRunning = false
     }
 }

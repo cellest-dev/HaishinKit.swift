@@ -27,6 +27,7 @@ public class PiPHKView: UIView {
             layer.videoGravity = videoGravity
         }
     }
+    private var diagVideoEnqueueCount = 0
 
     /// Initializes and returns a newly allocated view object with the specified frame rectangle.
     override public init(frame: CGRect) {
@@ -65,6 +66,7 @@ public class PiPHKView: NSView {
             layer?.setValue(videoGravity, forKey: "videoGravity")
         }
     }
+    private var diagVideoEnqueueCount = 0
 
     /// Specifies how the video is displayed with in track.
     public var videoTrackId: UInt8? = UInt8.max
@@ -113,13 +115,7 @@ extension PiPHKView: MediaMixerOutput {
 
     nonisolated public func mixer(_ mixer: MediaMixer, didOutput sampleBuffer: CMSampleBuffer) {
         Task { @MainActor in
-            #if os(macOS)
-            (layer as? AVSampleBufferDisplayLayer)?.enqueue(sampleBuffer)
-            self.needsDisplay = true
-            #else
-            (layer as AVSampleBufferDisplayLayer).enqueue(sampleBuffer)
-            self.setNeedsDisplay()
-            #endif
+            self.enqueueVideo(sampleBuffer, source: "mixer")
         }
     }
 }
@@ -131,13 +127,54 @@ extension PiPHKView: StreamOutput {
 
     nonisolated public func stream(_ stream: some StreamConvertible, didOutput video: CMSampleBuffer) {
         Task { @MainActor in
-            #if os(macOS)
-            (layer as? AVSampleBufferDisplayLayer)?.enqueue(video)
-            self.needsDisplay = true
-            #else
-            (layer as AVSampleBufferDisplayLayer).enqueue(video)
-            self.setNeedsDisplay()
-            #endif
+            self.enqueueVideo(video, source: "stream")
         }
+    }
+}
+
+extension PiPHKView {
+    @MainActor
+    private func enqueueVideo(_ sampleBuffer: CMSampleBuffer, source: String) {
+        #if os(macOS)
+        guard let displayLayer = layer as? AVSampleBufferDisplayLayer else {
+            hkdiag("[HKDIAG] PiPHKView.enqueueVideo noDisplayLayer source=%@", source)
+            return
+        }
+        #else
+        let displayLayer = layer as AVSampleBufferDisplayLayer
+        #endif
+
+        diagVideoEnqueueCount += 1
+        let readyBefore = displayLayer.isReadyForMoreMediaData
+        let statusBefore = displayLayer.status.rawValue
+        displayLayer.enqueue(sampleBuffer)
+        let statusAfter = displayLayer.status.rawValue
+        let errorText = displayLayer.error?.localizedDescription ?? "nil"
+        let timebaseRate: Double
+        if let timebase = displayLayer.controlTimebase {
+            timebaseRate = CMTimebaseGetRate(timebase)
+        } else {
+            timebaseRate = -1
+        }
+        if diagVideoEnqueueCount <= 5 || diagVideoEnqueueCount % 100 == 0 || !readyBefore || statusAfter != statusBefore || displayLayer.status == .failed {
+            hkdiag("[HKDIAG] PiPHKView.enqueueVideo source=%@ count=%d readyBefore=%@ statusBefore=%d statusAfter=%d err=%@ pts=%f dts=%f duration=%f key=%@ timebaseRate=%f",
+                  source,
+                  diagVideoEnqueueCount,
+                  readyBefore ? "true" : "false",
+                  statusBefore,
+                  statusAfter,
+                  errorText,
+                  sampleBuffer.presentationTimeStamp.seconds,
+                  sampleBuffer.decodeTimeStamp.seconds,
+                  sampleBuffer.duration.seconds,
+                  sampleBuffer.isNotSync ? "false" : "true",
+                  timebaseRate)
+        }
+
+        #if os(macOS)
+        self.needsDisplay = true
+        #else
+        self.setNeedsDisplay()
+        #endif
     }
 }
