@@ -77,20 +77,20 @@ extension MediaLink: AsyncRunner {
                 let currentTime = await getCurrentTime(currentTime.targetTimestamp - currentTime.timestamp)
                 var frameCount = 0
                 let storageEmpty = storage.isEmpty
+                // RTMP playback ライブ視聴の低遅延優先 patch:
+                // 元の `first.pts - ptsOrigin <= currentTime` 条件は audio currentTime
+                // (AVAudioPlayerNode.sampleTime/sampleRate = 0 基準) と video PTS
+                // (RTMP timestamp = 絶対秒、7777.x のような値) が独立進行する場合に
+                // 常に未来扱いになり storage 満杯 → QueueIsFull → 表示が間引かれて
+                // 体感 1fps となる事象を引き起こす。storage に入った video frame は
+                // 次の displayLink tick で全部 yield して PiPHKView の ASBDL に流す。
                 while !storage.isEmpty {
                     guard let first = storage.head else {
                         break
                     }
-                    if first.presentationTimeStamp.seconds - presentationTimeStampOrigin.seconds <= currentTime {
-                        continutation?.yield(first)
-                        frameCount += 1
-                        _ = storage.dequeue()
-                    } else {
-                        if 2 < frameCount {
-                            logger.info("droppedFrame: \(frameCount)")
-                        }
-                        break
-                    }
+                    continutation?.yield(first)
+                    frameCount += 1
+                    _ = storage.dequeue()
                 }
                 diagTick += 1
                 // displayLink は ~60Hz。60tick (1秒) ごとに状態を出す。
