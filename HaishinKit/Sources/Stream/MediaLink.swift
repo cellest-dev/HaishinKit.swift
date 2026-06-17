@@ -76,7 +76,7 @@ extension MediaLink: AsyncRunner {
                 let audioCurrent = await audioPlayer?.currentTime ?? -1
                 let currentTime = await getCurrentTime(currentTime.targetTimestamp - currentTime.timestamp)
                 var frameCount = 0
-                let storageCount = storage.count
+                let storageEmpty = storage.isEmpty
                 while !storage.isEmpty {
                     guard let first = storage.head else {
                         break
@@ -95,8 +95,8 @@ extension MediaLink: AsyncRunner {
                 diagTick += 1
                 // displayLink は ~60Hz。60tick (1秒) ごとに状態を出す。
                 if diagTick % 60 == 0 {
-                    NSLog("[HKDIAG] MediaLink.tick queue=%d/%d currentTime=%f audioCurrent=%f frameCountThisTick=%d duration=%f",
-                          storageCount, Self.capacity, currentTime, audioCurrent, frameCount, duration)
+                    NSLog("[HKDIAG] MediaLink.tick storageEmpty=%@ currentTime=%f audioCurrent=%f frameCountThisTick=%d duration=%f",
+                          storageEmpty ? "true" : "false", currentTime, audioCurrent, frameCount, duration)
                 }
             }
         }
