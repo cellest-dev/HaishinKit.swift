@@ -636,21 +636,31 @@ public actor RTMPStream {
     private func append(_ message: RTMPAudioMessage, type: RTMPChunkType) {
         audioTimestamp.update(message, chunkType: type)
         guard message.codec.isSupported else {
+            NSLog("[HKDIAG] RTMPStream.audio UNSUPPORTED codec=%@ payload.count=%d",
+                  String(describing: message.codec), message.payload.count)
             return
         }
         switch message.payload[1] {
         case RTMPAACPacketType.seq.rawValue:
-            audioFormat = message.makeAudioFormat()
+            let newFormat = message.makeAudioFormat()
+            NSLog("[HKDIAG] RTMPStream.audio SEQ packet, audioFormat=%@",
+                  String(describing: newFormat))
+            audioFormat = newFormat
         case RTMPAACPacketType.raw.rawValue:
             if audioFormat == nil {
-                audioFormat = message.makeAudioFormat()
+                let newFormat = message.makeAudioFormat()
+                NSLog("[HKDIAG] RTMPStream.audio RAW without prior SEQ -> derive format=%@",
+                      String(describing: newFormat))
+                audioFormat = newFormat
             }
             if let audioBuffer {
                 message.copyMemory(audioBuffer)
                 Task { await incoming.append(audioBuffer, when: audioTimestamp.value) }
+            } else {
+                NSLog("[HKDIAG] RTMPStream.audio RAW but audioBuffer=nil (audioFormat didSet not yet run?)")
             }
         default:
-            break
+            NSLog("[HKDIAG] RTMPStream.audio unknown packetType=%d", Int(message.payload[1]))
         }
     }
 

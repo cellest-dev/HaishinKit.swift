@@ -44,8 +44,18 @@ final actor AudioPlayerNode {
     }
 
     func enqueue(_ audioBuffer: AVAudioBuffer, when: AVAudioTime) async {
+        let isFormatChange = (format != audioBuffer.format)
         format = audioBuffer.format
-        guard let audioBuffer = audioBuffer as? AVAudioPCMBuffer, await player?.isConnected(self) == true else {
+        let isConn = (await player?.isConnected(self) == true)
+        let isPCM = (audioBuffer is AVAudioPCMBuffer)
+        if isFormatChange || !isConn {
+            NSLog("[HKDIAG] AudioPlayerNode.enqueue formatChange=%@ isConnected=%@ isPCM=%@ buffered=%d",
+                  isFormatChange ? "true" : "false",
+                  isConn ? "true" : "false",
+                  isPCM ? "true" : "false",
+                  scheduledAudioBuffers)
+        }
+        guard let audioBuffer = audioBuffer as? AVAudioPCMBuffer, isConn else {
             return
         }
         if !audioTime.hasAnchor {
@@ -53,6 +63,8 @@ final actor AudioPlayerNode {
         }
         scheduledAudioBuffers += 1
         if !isPaused && !playerNode.isPlaying && Self.bufferCounts <= scheduledAudioBuffers {
+            NSLog("[HKDIAG] AudioPlayerNode.enqueue playerNode.play() buffered=%d",
+                  scheduledAudioBuffers)
             playerNode.play()
         }
         Task {

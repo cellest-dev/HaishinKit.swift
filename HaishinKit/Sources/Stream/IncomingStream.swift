@@ -45,6 +45,8 @@ package final actor IncomingStream {
 
     /// Attaches an audio player.
     public func attachAudioPlayer(_ audioPlayer: AudioPlayer?) async {
+        NSLog("[HKDIAG] IncomingStream.attachAudioPlayer player=%@",
+              audioPlayer == nil ? "nil" : "set")
         await audioPlayerNode?.detach()
         audioPlayerNode = await audioPlayer?.makePlayerNode()
         await mediaLink.setAudioPlayer(audioPlayerNode)
@@ -57,6 +59,8 @@ extension IncomingStream: AsyncRunner {
         guard !isRunning else {
             return
         }
+        NSLog("[HKDIAG] IncomingStream.startRunning audioPlayerNode=%@",
+              audioPlayerNode == nil ? "nil" : "set")
         audioCodec.settings.format = .pcm
         videoCodec.startRunning()
         audioCodec.startRunning()
@@ -74,7 +78,13 @@ extension IncomingStream: AsyncRunner {
         }
         Task {
             await audioPlayerNode?.startRunning()
+            var audioCount = 0
             for await audio in audioCodec.outputStream {
+                audioCount += 1
+                if audioCount <= 5 || audioCount % 100 == 0 {
+                    NSLog("[HKDIAG] IncomingStream.audioLoop count=%d audioPlayerNode=%@",
+                          audioCount, audioPlayerNode == nil ? "nil" : "set")
+                }
                 await audioPlayerNode?.enqueue(audio.0, when: audio.1)
                 await stream?.append(audio.0, when: audio.1)
             }

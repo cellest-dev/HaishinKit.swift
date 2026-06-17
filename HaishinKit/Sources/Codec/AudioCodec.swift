@@ -81,8 +81,16 @@ final class AudioCodec {
     }
 
     func append(_ audioBuffer: AVAudioBuffer, when: AVAudioTime) {
+        let isFormatChange = (inputFormat != audioBuffer.format)
         inputFormat = audioBuffer.format
+        if isFormatChange {
+            NSLog("[HKDIAG] AudioCodec.append format change new=%@",
+                  String(describing: audioBuffer.format))
+        }
         guard let audioConverter, isRunning else {
+            if isRunning {
+                NSLog("[HKDIAG] AudioCodec.append SKIP audioConverter=nil")
+            }
             return
         }
         var error: NSError?

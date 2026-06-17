@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import Foundation
 
 /// An object that provides the interface to control audio playback.
 public final actor AudioPlayer {
@@ -9,6 +10,7 @@ public final actor AudioPlayer {
     /// Create an audio player object.
     public init(audioEngine: AVAudioEngine) {
         self.audioEngine = audioEngine
+        NSLog("[HKDIAG] AudioPlayer.init engine=%p", audioEngine)
     }
 
     func isConnected(_ playerNode: AudioPlayerNode) -> Bool {
@@ -17,15 +19,33 @@ public final actor AudioPlayer {
 
     func connect(_ playerNode: AudioPlayerNode, format: AVAudioFormat?) {
         guard let audioEngine, let avPlayerNode = playerNodes[playerNode] else {
+            NSLog("[HKDIAG] AudioPlayer.connect ABORT engine=%@ playerNodes[node]=%@",
+                  audioEngine == nil ? "nil" : "set",
+                  playerNodes[playerNode] == nil ? "nil" : "set")
             return
         }
         if let format {
+            NSLog("[HKDIAG] AudioPlayer.connect pre format=%@ isRunning=%@",
+                  String(describing: format),
+                  audioEngine.isRunning ? "true" : "false")
             audioEngine.connect(avPlayerNode, to: audioEngine.outputNode, format: format)
             if !audioEngine.isRunning {
-                try? audioEngine.start()
+                do {
+                    try audioEngine.start()
+                    NSLog("[HKDIAG] AudioPlayer.connect engine.start OK isRunning=%@",
+                          audioEngine.isRunning ? "true" : "false")
+                } catch {
+                    NSLog("[HKDIAG] AudioPlayer.connect engine.start FAILED %@",
+                          error.localizedDescription)
+                }
+            } else {
+                NSLog("[HKDIAG] AudioPlayer.connect engine already running")
             }
             connected[playerNode] = true
+            NSLog("[HKDIAG] AudioPlayer.connect DONE connected=true outFmt=%@",
+                  String(describing: audioEngine.outputNode.outputFormat(forBus: 0)))
         } else {
+            NSLog("[HKDIAG] AudioPlayer.connect disconnect (format=nil)")
             if audioEngine.isRunning {
                 audioEngine.stop()
             }
@@ -46,6 +66,8 @@ public final actor AudioPlayer {
         audioEngine?.attach(avAudioPlayerNode)
         let playerNode = AudioPlayerNode(player: self, playerNode: avAudioPlayerNode)
         playerNodes[playerNode] = avAudioPlayerNode
+        NSLog("[HKDIAG] AudioPlayer.makePlayerNode attached node=%p engineSet=%@",
+              avAudioPlayerNode, audioEngine == nil ? "false" : "true")
         return playerNode
     }
 }
